@@ -38,7 +38,7 @@ The `mps_accel_core` C++ module calls Apple's `MPSMatrixMultiplication` directly
 ### Build from Source
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mps-accelerate.git
+git clone https://github.com/SrinivasMohanVfx/mps-accelerate.git
 cd mps-accelerate
 pip install -r requirements.txt
 make clean && make all
