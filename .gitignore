@@ -1,0 +1,19 @@
+# Build artifacts (users build from source)
+*.so
+*.dylib
+*.metallib
+*.air
+*.o
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,3 @@
+# ComfyUI integration dependencies
+# (ComfyUI already provides torch — this lists what mps-accelerate needs)
+torch>=2.0.0
