@@ -5,6 +5,10 @@ import torch.nn.functional as F
 
 # Resolve local library path — metallib sits beside this module
 LIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default.metallib")
+# Global enable flag — patching happens early (import time) so all modules
+# get consistent references, but acceleration only activates when the node runs.
+_accel_enabled = False
+
 try:
     from . import mps_accel_core
 except ImportError:
@@ -53,8 +57,9 @@ def patch_model_attention():
     old_linear = F.linear
 
     def mps_linear_wrapper(input, weight, bias=None):
-        if not hasattr(mps_linear_wrapper, "call_count"): mps_linear_wrapper.call_count = 0
-        mps_linear_wrapper.call_count += 1
+        # Bypass if acceleration not activated by node
+        if not _accel_enabled:
+            return old_linear(input, weight, bias)
         
         if input.device.type == "mps" and weight.device.type == "mps":
             import math
@@ -108,20 +113,20 @@ def patch_model_attention():
                     
         return old_linear(input, weight, bias)
 
-    # 2. Apply F.linear patch only (SDPA left to native PyTorch for all models)
+    # 2. Apply F.linear patch
     F.linear = mps_linear_wrapper
     
     # 3. Global scan: patch all modules that imported F.linear
-    patch_count = 0
+    linear_count = 0
     for mod_name, mod in list(sys.modules.items()):
         if mod_name.startswith("comfy") or mod_name.startswith("torch"):
             if hasattr(mod, "linear"):
                 attr = getattr(mod, "linear")
                 if attr is old_linear:
                     setattr(mod, "linear", mps_linear_wrapper)
-                    patch_count += 1
+                    linear_count += 1
                     
-    print(f">> [MPS-Accel] Patched F.linear in {patch_count} modules. Acceleration active.")
+    print(f">> [MPS-Accel] Patched F.linear in {linear_count} modules. Acceleration active.")
 
 class MPSAccelLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=True):

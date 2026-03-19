@@ -8,7 +8,15 @@ if node_dir not in sys.path:
 
 import torch
 import torch.nn as nn
+from . import mps_ops
 from .mps_ops import MPSAccelLinear, patch_model_attention
+
+# ─── Early patch at import time ───
+# Installs our wrapper on F.linear BEFORE any model loads, so all modules
+# get consistent references. The wrapper defaults to bypass mode (no overhead)
+# until the node activates it.
+if torch.backends.mps.is_available():
+    patch_model_attention()
 
 class PatchModelWithMPS:
     @classmethod
@@ -20,13 +28,10 @@ class PatchModelWithMPS:
     CATEGORY = "MPS-Accelerate"
 
     def patch(self, model):
-        diffusion_model = model.model.diffusion_model
-        print(f">> [MPS-Accel] Patching model with MPS acceleration...")
-        
-        # Patch F.linear and attention functions globally
-        patch_model_attention()
-        
-        print(f">> [MPS-Accel] Patching complete. Ready for generation.")
+        # Activate acceleration — flips the global flag so the wrapper
+        # dispatches to MPSMatrixMultiplication instead of native F.linear
+        mps_ops._accel_enabled = True
+        print(f">> [MPS-Accel] Acceleration ENABLED. (Restart ComfyUI to disable)")
         return (model,)
 
 NODE_CLASS_MAPPINGS = {
