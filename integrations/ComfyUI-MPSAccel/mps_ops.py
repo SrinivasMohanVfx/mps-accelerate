@@ -72,14 +72,18 @@ def patch_model_attention():
                     else:
                         w_c = weight
                     
-                    # Convert bfloat16 → float32 (NOT float16!)
-                    # float16 max is only 65504 — models like Lumina2 overflow it
-                    # float32 is fully supported by MPSMatrixMultiplication
+                    # Smart dtype conversion for bfloat16:
+                    # Try float16 first (2× faster GEMM), but if weights overflow
+                    # float16 range (max 65504), fall back to float32 safely.
                     original_dtype = input.dtype
                     if in_c.dtype == torch.bfloat16:
-                        in_c = in_c.float()
-                    if w_c.dtype == torch.bfloat16:
-                        w_c = w_c.float()
+                        w_max = w_c.abs().max().item()
+                        if w_max < 65500:  # fits in float16
+                            in_c = in_c.half()
+                            w_c = w_c.half()
+                        else:
+                            in_c = in_c.float()
+                            w_c = w_c.float()
                     
                     compute_dtype = in_c.dtype
                     out_shape = list(input.shape[:-1]) + [weight.shape[0]]
@@ -88,7 +92,7 @@ def patch_model_attention():
                     mps_accel_core.linear_mps(in_c, w_c, out, False, LIB_PATH)
                     
                     if original_dtype == torch.bfloat16:
-                        out = out.bfloat16()
+                        out = out.to(original_dtype)
                     
                     # Tether async pointers to prevent GC
                     out._metal_retain_x = in_c
