@@ -13,7 +13,15 @@ _weight_cache = {}  # Cache weight alignment + bf16 safety per weight id()
 try:
     from . import mps_accel_core
 except ImportError:
-    import mps_accel_core
+    try:
+        import mps_accel_core
+    except ImportError:
+        import sys
+        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+        print(f">> [MPS-Accel] ERROR: Cannot load mps_accel_core.")
+        print(f">> [MPS-Accel] Pre-built binary is for Python 3.11, you have Python {py_ver}.")
+        print(f">> [MPS-Accel] Please rebuild: cd mps-accelerate && make clean && make all")
+        raise
 
 def mps_sdpa(q, k, v, scale=None, theta=10000.0):
     """Scaled Dot-Product Attention via custom Metal SIMD kernel."""
