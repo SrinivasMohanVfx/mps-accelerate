@@ -3,8 +3,8 @@
 **Drop-in PyTorch acceleration for Apple Silicon** — 22% faster inference by calling Apple's `MPSMatrixMultiplication` directly from C++, bypassing PyTorch's dispatch overhead.
 
 ```
-Native PyTorch MPS:  10.6 s/it
-MPS-Accelerate:       8.3 s/it  ← 22% faster
+Before (native PyTorch):  10.6 s/it
+After  (MPS-Accelerate):   8.3 s/it  ← 22% faster
 ```
 
 > Tested on MacBook Pro M2 Max (64GB) running Flux.1-Dev 12B (bfloat16, 5 steps).
