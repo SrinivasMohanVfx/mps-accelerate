@@ -8,6 +8,7 @@ LIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default.met
 # Global enable flag — patching happens early (import time) so all modules
 # get consistent references, but acceleration only activates when the node runs.
 _accel_enabled = False
+_weight_cache = {}  # Cache weight alignment + bf16 safety per weight id()
 
 try:
     from . import mps_accel_core
@@ -62,49 +63,50 @@ def patch_model_attention():
             return old_linear(input, weight, bias)
         
         if input.device.type == "mps" and weight.device.type == "mps":
-            import math
             K = input.size(-1)
-            M = math.prod(input.shape[:-1])
+            M = input.numel() // K
             N = weight.size(0)
             
             # Only dispatch dense operations to MPS GEMM
             if M >= 128 and N >= 128 and K >= 128:
                 try:
-                    in_c = input.contiguous()
-                    byte_offset = weight.storage_offset() * weight.element_size()
-                    if byte_offset % 4 != 0 or not weight.is_contiguous():
-                        w_c = weight.clone().contiguous()
-                    else:
-                        w_c = weight
+                    in_c = input if input.is_contiguous() else input.contiguous()
                     
-                    # Smart dtype conversion for bfloat16:
-                    # Try float16 first (2× faster GEMM), but if weights overflow
-                    # float16 range (max 65504), fall back to float32 safely.
+                    # Cache weight alignment + bf16 check per weight tensor
+                    w_id = id(weight)
+                    cached = _weight_cache.get(w_id)
+                    if cached is None:
+                        byte_offset = weight.storage_offset() * weight.element_size()
+                        needs_clone = (byte_offset % 4 != 0 or not weight.is_contiguous())
+                        bf16_safe = None
+                        if weight.dtype == torch.bfloat16:
+                            w_tmp = weight.clone().contiguous() if needs_clone else weight
+                            w_max = w_tmp.abs().max().item()
+                            bf16_safe = w_max < 65500
+                        _weight_cache[w_id] = (needs_clone, bf16_safe)
+                        cached = _weight_cache[w_id]
+                    
+                    needs_clone, bf16_safe = cached
+                    w_c = weight.clone().contiguous() if needs_clone else weight
+                    
+                    # dtype conversion
                     original_dtype = input.dtype
-                    if in_c.dtype == torch.bfloat16:
-                        w_max = w_c.abs().max().item()
-                        if w_max < 65500:  # fits in float16
+                    if original_dtype == torch.bfloat16:
+                        if bf16_safe:
                             in_c = in_c.half()
-                            w_c = w_c.half()
+                            w_c = w_c.half() if w_c.dtype == torch.bfloat16 else w_c
                         else:
                             in_c = in_c.float()
-                            w_c = w_c.float()
+                            w_c = w_c.float() if w_c.dtype == torch.bfloat16 else w_c
                     
-                    compute_dtype = in_c.dtype
-                    out_shape = list(input.shape[:-1]) + [weight.shape[0]]
-                    out = torch.zeros(out_shape, device=input.device, dtype=compute_dtype)
-                    
+                    out = torch.empty((*input.shape[:-1], N), device=input.device, dtype=in_c.dtype)
                     mps_accel_core.linear_mps(in_c, w_c, out, False, LIB_PATH)
                     
                     if original_dtype == torch.bfloat16:
                         out = out.to(original_dtype)
                     
-                    # Tether async pointers to prevent GC
-                    out._metal_retain_x = in_c
-                    out._metal_retain_w = w_c
-                    
                     if bias is not None:
-                        out.add_(bias.to(out.dtype))
+                        out.add_(bias)
 
                     return out
                 except Exception as e:

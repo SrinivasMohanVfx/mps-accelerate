@@ -1,9 +1,13 @@
-# Build artifacts (users build from source)
+# Build artifacts (root-level, from make all)
 *.so
 *.dylib
 *.metallib
 *.air
 *.o
+
+# Allow pre-built binaries in the integration folder (so users don't need to compile)
+!integrations/ComfyUI-MPSAccel/*.so
+!integrations/ComfyUI-MPSAccel/*.metallib
 
 # Python
 __pycache__/
