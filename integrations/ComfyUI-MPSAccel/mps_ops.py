@@ -23,32 +23,6 @@ except ImportError:
         print(f">> [MPS-Accel] Please rebuild: cd mps-accelerate && make clean && make all")
         raise
 
-def mps_sdpa(q, k, v, scale=None, theta=10000.0):
-    """Scaled Dot-Product Attention via custom Metal SIMD kernel."""
-    original_dtype = q.dtype
-    is_shd = False
-    
-    if q.dim() == 4 and q.size(1) < q.size(2):  # [B, H, S, D]
-        q = q.transpose(1, 2).contiguous()
-        k = k.transpose(1, 2).contiguous()
-        v = v.transpose(1, 2).contiguous()
-        is_shd = False
-    else:
-        is_shd = True
-        
-    B, S, H, D = q.shape
-    if scale is None:
-        scale = 1.0 / (D ** 0.5)
-        
-    out = torch.empty((B, S, H, D), device=q.device, dtype=q.dtype)
-    
-    for b in range(B):
-        mps_accel_core.sdpa_mps(q[b], k[b], v[b], out[b].view(-1), scale, LIB_PATH)
-    
-    if not is_shd:
-        out = out.transpose(1, 2)  # Back to [B, H, S, D]
-        
-    return out
 
 def patch_model_attention():
     """
@@ -137,25 +111,5 @@ def patch_model_attention():
                     linear_count += 1
                     
     print(f">> [MPS-Accel] Patched F.linear in {linear_count} modules. Acceleration active.")
-
-class MPSAccelLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=True):
-        super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_features))
-        else:
-            self.register_parameter('bias', None)
-
-    def forward(self, x):
-        return F.linear(x, self.weight, self.bias)
-
-    @torch.no_grad()
-    def convert_weights(self):
-        self.weight.data = self.weight.data.half().contiguous()
-        if self.bias is not None:
-            self.bias.data = self.bias.data.float().contiguous()
 
 print(">> [MPS-Accel] Initialized.")

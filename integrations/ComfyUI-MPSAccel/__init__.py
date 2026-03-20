@@ -9,7 +9,7 @@ if node_dir not in sys.path:
 import torch
 import torch.nn as nn
 from . import mps_ops
-from .mps_ops import MPSAccelLinear, patch_model_attention
+from .mps_ops import patch_model_attention
 
 # ─── Early patch at import time ───
 # Installs our wrapper on F.linear BEFORE any model loads, so all modules

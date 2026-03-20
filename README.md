@@ -31,7 +31,7 @@ The `mps_accel_core` C++ module calls Apple's `MPSMatrixMultiplication` directly
 
 - macOS 13+ (Ventura or later)
 - Apple Silicon (M1/M2/M3/M4, any variant)
-- Python 3.10+
+- Python 3.11 (pre-built) or 3.10+ (build from source)
 - PyTorch 2.0+ with MPS support
 - Xcode 15+ Command Line Tools
 
@@ -60,16 +60,16 @@ PYTHONPATH=. python tests/test_all_shapes.py
 
 ### ComfyUI (Drop-in Custom Node)
 
-1. Copy the `integrations/comfyui/` folder to your ComfyUI custom nodes:
+1. Copy the integration folder to ComfyUI (pre-built binaries included — no compilation needed):
 ```bash
-cp -r integrations/comfyui /path/to/ComfyUI/custom_nodes/ComfyUI-MPSAccel
-cp mps_accel_core.cpython-*-darwin.so default.metallib \
-   /path/to/ComfyUI/custom_nodes/ComfyUI-MPSAccel/
+cp -r integrations/ComfyUI-MPSAccel /path/to/ComfyUI/custom_nodes/ComfyUI-MPSAccel
 ```
 
 2. Restart ComfyUI
 3. Add the **"MPS Accelerate"** node to your workflow (connects to your model loader)
-4. Look for `[MPS-Accel]` in the console to confirm it's active
+4. Look for `>> [MPS-Accel] Acceleration ENABLED.` in the console to confirm it's active
+
+> **Note:** Pre-built binaries are for Python 3.11. If you're on a different Python version, rebuild from source: `make clean && make all`, then copy the new `.so` and `.metallib` into the integration folder.
 
 ### Any PyTorch Script
 
@@ -139,9 +139,11 @@ mps-accelerate/
 │   ├── flux_graph.mm           ← Custom Metal SDPA kernel dispatch
 │   └── flux_kernels.metal      ← Metal compute shaders (SDPA + reference GEMM)
 ├── integrations/
-│   └── comfyui/                ← Drop-in ComfyUI custom node
-│       ├── __init__.py         ← Node registration
-│       └── mps_ops.py          ← F.linear monkey-patch + bf16↔fp16 handling
+│   └── ComfyUI-MPSAccel/       ← Drop-in ComfyUI custom node (with pre-built binaries)
+│       ├── __init__.py         ← Node registration + early patching
+│       ├── mps_ops.py          ← F.linear monkey-patch + bf16↔fp16 handling
+│       ├── mps_accel_core.*.so ← Pre-built C++ module (Python 3.11)
+│       └── default.metallib    ← Pre-built Metal shaders
 ├── tests/
 │   ├── test_all_shapes.py      ← Correctness across 5 matrix shapes
 │   ├── test_scale.py           ← Single large shape test
