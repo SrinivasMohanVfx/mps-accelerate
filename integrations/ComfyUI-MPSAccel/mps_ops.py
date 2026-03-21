@@ -9,6 +9,9 @@ LIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default.met
 # get consistent references, but acceleration only activates when the node runs.
 _accel_enabled = False
 _weight_cache = {}  # Cache weight alignment + bf16 safety per weight id()
+_accel_count = 0    # Count of accelerated linear ops (for status report)
+_skip_count = 0     # Count of skipped ops (fp32/small)
+_status_printed = False  # One-time runtime status
 
 try:
     from . import mps_accel_core
@@ -40,6 +43,7 @@ def patch_model_attention():
     old_linear = F.linear
 
     def mps_linear_wrapper(input, weight, bias=None):
+        global _accel_count, _skip_count, _status_printed
         # Bypass if acceleration not activated by node
         if not _accel_enabled:
             return old_linear(input, weight, bias)
@@ -49,8 +53,8 @@ def patch_model_attention():
             M = input.numel() // K
             N = weight.size(0)
             
-            # Only dispatch dense operations to MPS GEMM
-            if M >= 128 and N >= 128 and K >= 128:
+            # Only dispatch dense fp16/bf16 to MPS GEMM (fp32 is already optimal in native PyTorch)
+            if M >= 128 and N >= 128 and K >= 128 and input.dtype != torch.float32:
                 try:
                     in_c = input if input.is_contiguous() else input.contiguous()
                     
@@ -83,6 +87,7 @@ def patch_model_attention():
                     
                     out = torch.empty((*input.shape[:-1], N), device=input.device, dtype=in_c.dtype)
                     mps_accel_core.linear_mps(in_c, w_c, out, False, LIB_PATH)
+                    _accel_count += 1
                     
                     if original_dtype == torch.bfloat16:
                         out = out.to(original_dtype)
@@ -94,8 +99,20 @@ def patch_model_attention():
                 except Exception as e:
                     print(f">> [MPS-Accel] Linear Error: {e}")
                     return old_linear(input, weight, bias)
+            else:
+                _skip_count += 1
                     
-        return old_linear(input, weight, bias)
+        result = old_linear(input, weight, bias)
+        
+        # One-time runtime status after first inference pass
+        if not _status_printed and (_skip_count + _accel_count) > 50:
+            _status_printed = True
+            if _skip_count > _accel_count:
+                print(f">> [MPS-Accel] fp32 mode detected — bypassing acceleration (native is optimal for fp32).")
+            else:
+                print(f">> [MPS-Accel] Accelerating {_accel_count} linear ops via MPSMatrixMultiplication.")
+        
+        return result
 
     # 2. Apply F.linear patch
     F.linear = mps_linear_wrapper

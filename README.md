@@ -168,9 +168,23 @@ mps-accelerate/
 |-------|----------------------|-------------------|
 | float16 | ✅ Native | ✅ Native |
 | bfloat16 | ✅ Auto-cast to fp16 | ✅ Native |
-| float32 | ✅ Via MPSMatrixMultiplication | ❌ Not supported |
+| float32 | ⚠️ Bypassed (native is optimal) | ❌ Not supported |
 
-> **Note:** `MPSMatrixMultiplication` doesn't support bfloat16 natively. The ComfyUI integration handles bf16↔fp16 conversion automatically.
+> **Note:** `MPSMatrixMultiplication` doesn't support bfloat16 natively. The ComfyUI integration handles bf16↔fp16 conversion automatically, with a safety check for weights that exceed fp16 range.
+
+---
+
+## When to Use
+
+MPS-Accelerate is most effective for users who **can't use `--force-fp32`** due to memory constraints:
+
+| RAM | `--force-fp32` | MPS-Accelerate | Recommendation |
+|-----|---------------|----------------|----------------|
+| 16 GB | ❌ OOM | ✅ ~22% faster | **Use MPS-Accelerate** |
+| 32 GB | ⚠️ Tight | ✅ ~22% faster | **Use MPS-Accelerate** |
+| 64 GB+ | ✅ Fastest (~7s/it) | ✅ Fast (~8.3s/it) | Either works |
+
+> **Note:** `--force-fp32` converts the entire model to fp32 at load, eliminating per-op dtype conversion. It's faster but uses **2× memory**. MPS-Accelerate achieves similar speedup without the memory penalty.
 
 ---
 
@@ -178,7 +192,14 @@ mps-accelerate/
 
 - **macOS only** — requires Metal and MPS frameworks
 - **bfloat16 conversion overhead** — bf16 models incur a small type-cast cost per linear call
+- **fp32 auto-bypassed** — when using `--force-fp32`, acceleration is automatically skipped (native fp32 is already optimal)
 - **Minimum dimensions** — operations smaller than 128×128×128 fall back to PyTorch (dispatch overhead would negate GEMM savings)
+
+---
+
+## Roadmap
+
+- **v2: Model-wide fp16 conversion** — Convert the entire model to fp16 once at load (like `--force-fp32` but at half the memory). Early tests show **~6.8s/it** (36% faster). Working on precision-safe per-layer conversion for weights that exceed fp16 range.
 
 ---
 
